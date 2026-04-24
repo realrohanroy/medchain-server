@@ -97,5 +97,53 @@ class AccessSharedRecordsView(APIView):
             return paginator.get_paginated_response(serializer.data)
 
         # fallback (if pagination disabled)
+        # fallback (if pagination disabled)
         serializer = RecordTimelineSerializer(records, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from .models import AccessRequest, AccessGrant
+from .serializers import AccessRequestSerializer, AccessGrantSerializer
+
+class AccessRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = AccessRequestSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'doctor':
+            return AccessRequest.objects.filter(doctor=user).order_by('-created_at')
+        return AccessRequest.objects.filter(patient=user).order_by('-created_at')
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        access_request = self.get_object()
+        if access_request.patient != request.user:
+            return Response({"error": "Unauthorized"}, status=403)
+        
+        access_request.status = 'Approved'
+        access_request.save()
+
+        # Create Grant automatically
+        AccessGrant.objects.get_or_create(patient=request.user, doctor=access_request.doctor)
+        return Response({"status": "Approved"})
+
+    @action(detail=True, methods=['post'])
+    def decline(self, request, pk=None):
+        access_request = self.get_object()
+        if access_request.patient != request.user:
+            return Response({"error": "Unauthorized"}, status=403)
+        access_request.status = 'Declined'
+        access_request.save()
+        return Response({"status": "Declined"})
+
+class AccessGrantViewSet(viewsets.ModelViewSet):
+    serializer_class = AccessGrantSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'doctor':
+            return AccessGrant.objects.filter(doctor=user).order_by('-created_at')
+        return AccessGrant.objects.filter(patient=user).order_by('-created_at')

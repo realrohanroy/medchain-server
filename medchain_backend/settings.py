@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'parsing',
     'appointments',
     'blockchain',
+    'clinical',
 ]
 
 MIDDLEWARE = [

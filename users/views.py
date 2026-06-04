@@ -8,6 +8,14 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        email = request.data.get('email')
+        from .models import CustomUser
+        if email and CustomUser.objects.filter(email=email).exists():
+            return Response(
+                {"detail": "An account with this email already exists. Please log in."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -147,10 +155,23 @@ class GoogleAuthView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            flow = request.data.get('flow', 'login')
+
             # Check if user already exists
             user = CustomUser.objects.filter(email=email).first()
 
-            if not user:
+            if flow == 'login':
+                if not user:
+                    return Response(
+                        {"detail": "No account found with this email. Please register first."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            elif flow == 'register':
+                if user:
+                    return Response(
+                        {"detail": "An account with this email already exists. Please log in."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 # Create new user
                 role = request.data.get('role', 'PATIENT')
                 if role not in ('PATIENT', 'DOCTOR'):
@@ -161,6 +182,10 @@ class GoogleAuthView(APIView):
                     first_name=first_name,
                     last_name=last_name,
                     role=role,
+                )
+                return Response(
+                    {"message": "User registered successfully. Please log in."},
+                    status=status.HTTP_201_CREATED
                 )
 
             # Generate JWT tokens

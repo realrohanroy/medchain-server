@@ -12,6 +12,13 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
+        from .models import CustomUser
+        from rest_framework import serializers
+
+        email = attrs.get(self.username_field)
+        if email and not CustomUser.objects.filter(email=email).exists():
+            raise serializers.ValidationError({"detail": "No account found with this email. Please register first."})
+
         data = super().validate(attrs)
         # Include user profile fields in the response body
         data['role'] = self.user.role

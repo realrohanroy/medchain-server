@@ -8,6 +8,14 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        email = request.data.get('email')
+        from .models import CustomUser
+        if email and CustomUser.objects.filter(email=email).exists():
+            return Response(
+                {"detail": "An account with this email already exists. Please log in."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -109,4 +117,93 @@ class DoctorListView(APIView):
                 "specialty": specialty
             })
         return Response(data, status=status.HTTP_200_OK)
+
+
+from django.conf import settings
+from .jwt import CustomTokenObtainPairSerializer
+from .models import CustomUser
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
+
+class GoogleAuthView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        credential = request.data.get('credential')
+        if not credential:
+            return Response(
+                {"error": "Google credential token is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Verify the Google ID token
+            idinfo = id_token.verify_oauth2_token(
+                credential,
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID
+            )
+
+            email = idinfo.get('email')
+            first_name = idinfo.get('given_name', '')
+            last_name = idinfo.get('family_name', '')
+
+            if not email:
+                return Response(
+                    {"error": "Unable to retrieve email from Google token."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            flow = request.data.get('flow', 'login')
+
+            # Check if user already exists
+            user = CustomUser.objects.filter(email=email).first()
+
+            if flow == 'login':
+                if not user:
+                    return Response(
+                        {"detail": "No account found with this email. Please register first."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            elif flow == 'register':
+                if user:
+                    return Response(
+                        {"detail": "An account with this email already exists. Please log in."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                # Create new user
+                role = request.data.get('role', 'PATIENT')
+                if role not in ('PATIENT', 'DOCTOR'):
+                    role = 'PATIENT'
+
+                user = CustomUser.objects.create_user(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    role=role,
+                )
+                return Response(
+                    {"message": "User registered successfully. Please log in."},
+                    status=status.HTTP_201_CREATED
+                )
+
+            # Generate JWT tokens
+            token = CustomTokenObtainPairSerializer.get_token(user)
+
+            return Response({
+                "access": str(token.access_token),
+                "refresh": str(token),
+                "role": user.role,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "user_id": str(user.id),
+            }, status=status.HTTP_200_OK)
+
+        except ValueError:
+            return Response(
+                {"error": "Invalid Google token."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
